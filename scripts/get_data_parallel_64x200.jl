@@ -2,7 +2,7 @@ using DrWatson
 @quickactivate "INN_Velocity-Migration"
 
 using JLD, PyPlot, LinearAlgebra, Distributed, SharedArrays
-addprocs(20)
+addprocs(40)
 @everywhere include("../src/RTM_64x200.jl")
 @everywhere using .RTM_64x200, JUDI.TimeModeling, Dates
 
@@ -34,6 +34,7 @@ Mr = S * Tm
 ## Computing RTM images
 rtm1_all = SharedArray{Float32,3}(n1, n2, num)
 rtm2_all = SharedArray{Float32,3}(n1, n2, num)
+obdata = SharedArray{Float32,4}(num, 21, 201, 2001)
 
 @sync @distributed for i = 1:num
 
@@ -44,7 +45,8 @@ rtm2_all = SharedArray{Float32,3}(n1, n2, num)
     # m0 = ones(Float32, n) .* m[1,1] # constant velocity
 
     # Computing RTM images
-    rtm = rtm_isic(adjoint(m), adjoint(m0) )
+    d_obs, rtm = rtm_isic(adjoint(m), adjoint(m0) )
+    obdata[i,:,:,:] = permutedims( reshape(hcat(d_obs.data...), (2001,201,21) ), [3,2,1])
     rtm1_all[:,:,i] = adjoint(reshape(rtm, n)) 
 
     rtm = Mr' * rtm # mute water layers
@@ -52,13 +54,21 @@ rtm2_all = SharedArray{Float32,3}(n1, n2, num)
 
 end
 
+obdata = Array(obdata)
 rtm1_all = Array(rtm1_all)
 rtm2_all = Array(rtm2_all)
 
 println("Parallel computation finished")
+save(datadir("overthrust_4k_models_200x64_obdata.jld"), "obdata", obdata)
 save(datadir("overthrust_4k_rtm_64x200_lin_vel.jld"), "rtm1_all", rtm1_all, "rtm2_all", rtm2_all)
 
-# figures of rtm examples
+# figure examples
+figure(figsize=[12,8])
+ax1 = subplot(1,3,1); imshow(obdata[1,1,:,:]', vmin=-1, vmax=1, cmap="gray", aspect="auto"); title("d_obs from src1")
+ax2 = subplot(1,3,2); imshow(obdata[1,11,:,:]', vmin=-1, vmax=1, cmap="gray", aspect="auto"); title("d_obs from src11")
+ax3 = subplot(1,3,3); imshow(obdata[1,21,:,:]', vmin=-1, vmax=1, cmap="gray", aspect="auto"); title("d_obs from src21")
+savefig(datadir("figs", "examples_obdata.png"))
+
 figure(figsize=[20,8])
 ax1 = subplot(2, 3, 1); imshow(adjoint(m_all[:,:,1]), cmap="jet"); title("True velocity model1")
 ax2 = subplot(2, 3, 2); imshow(adjoint(m_all[:,:,2]), cmap="jet"); title("True velocity model2")

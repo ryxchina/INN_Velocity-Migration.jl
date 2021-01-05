@@ -9,15 +9,13 @@ using LinearAlgebra, InvertibleNetworks, PyPlot, Flux, Random, Test, JLD, Statis
 import Flux.Optimise.update!
 
 # Random seed
-Random.seed!(66)
+Random.seed!(666)
 
 
 ####################################################################################################
 # Load original data X (size of n1 x n2 x nc x ntrain)
 X_orig = load(datadir("vel_4k_samples_64x200_lin_vel.jld"), "m_all")
 Y_orig = load(datadir("rtm_4k_samples_64x200_lin_vel.jld"), "rtm1_all")
-X_orig = Float32.(X_orig)
-Y_orig = Float32.(Y_orig)
 n1, n2, nc, nsamples = size(X_orig)
 
 # Split in training - testing
@@ -61,7 +59,7 @@ end
 n_hidden = 64
 batchsize = 16 #4
 depth = 16
-CH = NetworkConditionalHINT(nx, ny, n_in, batchsize, n_hidden, depth) |>gpu
+CH = NetworkConditionalHINT(nx, ny, n_in, batchsize, n_hidden, depth)
 Params = get_params(CH)
 
 ####################################################################################################
@@ -77,44 +75,32 @@ function loss(CH, X, Y)
 end
 
 # Training
-max_epoch = 200
-max_iter = floor(Int, ntrain/batchsize)
+maxiter = 6000
 opt = Flux.ADAM(1f-3)
 lr_step = 100
 lr_decay_fn = Flux.ExpDecay(1f-3, .9, lr_step, 0.)
-losses = zeros(Float32, max_epoch*max_iter)
-fval = zeros(Float32, max_epoch)
+fval = zeros(Float32, maxiter)
 
 t1 = now()
 println(string("Training starts at ", t1))
-for i=1:max_epoch
+for j=1:maxiter
 
-    index = randperm(ntrain)
+    # Evaluate objective and gradients
+    idx = randperm(ntrain)[1:batchsize]
+    X = X_train[:, :, :, idx]
+    Y = Y_train[:, :, :, idx]
+    # Y = X + .5f0*randn(Float32, nx, ny, n_in, batchsize)
+    
+    fval[j] = loss(CH, X, Y)[1]
+    mod(j, 50) == 0 && (print("Iteration: ", j, "; f = ", fval[j], "; at ", now(), "\n"))
 
-    for j=1:max_iter
-
-        # Evaluate objective and gradients
-        idx = randperm(ntrain)[1:batchsize]
-        X = X_train[:, :, :, idx] |>gpu
-        Y = Y_train[:, :, :, idx] |>gpu
-        # Y = X + .5f0*randn(Float32, nx, ny, n_in, batchsize)
-        
-        losses[(i-1)*max_iter + j] = loss(CH, X, Y)[1]
-        GC.gc()
-
-        # Update params
-        for p in Params
-            update!(opt, p.data, p.grad)
-            update!(lr_decay_fn, p.data, p.grad)
-        end
-        clear_grad!(CH)
+    # Update params
+    for p in Params
+        update!(opt, p.data, p.grad)
+        update!(lr_decay_fn, p.data, p.grad)
     end
-
-    fval[i] = losses[i*max_iter]
-    mod(i, 10) == 0 && (print("Epoch: ", i, "; f = ", fval[i], "; at ", now(), "\n"))
-
+    clear_grad!(CH)
 end
-CH = CH |>cpu
 
 t2 = now()
 println(string("Training finishes after ", Dates.value.(t2-t1)/3600000, " hours"))
@@ -124,10 +110,10 @@ println(string("Training finishes after ", Dates.value.(t2-t1)/3600000, " hours"
 # test1 for vel + rtm_mig_vel
 # test2 for vel + rtm_const_vel
 # test3 for vel + rtm_lin_vel
-figfolder = string("chint/test3_", max_epoch, "_", depth, "_", batchsize)
+figfolder = string("chint/test3_cpu_", maxiter, "_", depth, "_", batchsize)
 mkpath(plotsdir(figfolder))
 
-save(plotsdir(figfolder, "chint.jld"), "CH", CH, "losses", losses, "fval", fval)
+save(plotsdir(figfolder, "chint.jld"), "Params", Params, "fval", fval)
 
 # Testing
 test_size = 100
@@ -158,7 +144,7 @@ for idx = 1:10
     X_post = wavelet_unsqueeze(X_post)
 
     save(plotsdir(figfolder, string("posterior_samples", idx, ".jld")), "X_fixed", X_fixed, "Y_fixed", Y_fixed, "X_post", X_post, "Zy_fixed", Zy_fixed)
-
+    
     # Plot posterior samples, mean and standard deviation
     figure(figsize=[20,8])
     X_post_mean = mean(X_post; dims=4)
@@ -188,10 +174,6 @@ Y_ = wavelet_unsqueeze(Y_)
 Zx = wavelet_unsqueeze(Zx)
 Zy = wavelet_unsqueeze(Zy)
 
-# X_fixed = wavelet_unsqueeze(X_fixed)
-# Y_fixed = wavelet_unsqueeze(Y_fixed)
-# Zy_fixed = wavelet_unsqueeze(Zy_fixed)
-# X_post = wavelet_unsqueeze(X_post)
 
 # Plot one sample from X and Y and their latent versions
 figure(figsize=[20,8])
@@ -219,5 +201,6 @@ ax8 = subplot(2,4,8); imshow(X[:, :, 1, i[4]], cmap="jet", aspect="auto"); color
 savefig(plotsdir(figfolder, "model_space_samples.png"))
 
 # Plot loss values
-figure(); plot(1:max_epoch, fval[1:max_epoch]); title("loss values")
+figure(); plot(1:maxiter, fval[1:maxiter]); title("loss values")
 savefig(plotsdir(figfolder, "loss_curve.png"))
+

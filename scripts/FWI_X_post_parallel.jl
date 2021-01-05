@@ -2,11 +2,12 @@ using DrWatson
 @quickactivate "INN_Velocity-Migration"
 
 using JLD, Statistics, PyPlot, ImageFiltering, InvertibleNetworks, LinearAlgebra, Distributed, SharedArrays
-addprocs(20)
-@everywhere include("../../../src/FWI_64x200.jl")
+addprocs(50)
+@everywhere include("../src/FWI_64x200.jl")
 @everywhere using .FWI_64x200, Statistics, ImageFiltering, Dates
 
-X_orig = load("../../../data/vel_4k_samples_64x200_lin_vel.jld")["m_all"];
+X_orig = load(datadir("vel_4k_samples_64x200_lin_vel.jld"), "m_all")
+X_orig = Float32.(X_orig)
 n1, n2, nc, nsamples = size(X_orig)
 ntrain = Int(nsamples*.9)
 X_train_orig=X_orig[:, :, :, 1:ntrain]
@@ -14,10 +15,10 @@ X_train_orig=X_orig[:, :, :, 1:ntrain]
 AN = ActNorm(ntrain)
 X_train_orig = AN.forward(X_train_orig) # zero mean and unit std of the training data X
 
-# define fig path
-datapath = "../figs/test3_6000_16_16/"
-figfolder = "test3_6000_16_16/posterior_samples2_p"
-mkpath(joinpath(pwd(), "figs", figfolder))
+# define data and figure path
+datapath = plotsdir("chint/test3_cpu_6000_16_16")
+figfolder = "fwi/test3_6000_16_16/posterior_samples2_50"
+mkpath(plotsdir(figfolder))
 
 X_fixed = load(joinpath(datapath, "posterior_samples2.jld"), "X_fixed")
 X_post  = load(joinpath(datapath, "posterior_samples2.jld"), "X_post")
@@ -27,7 +28,7 @@ X_post_mean = mean(X_post; dims=4)
 
 m = X_fixed[:, :, 1, 1] # true velocity in squared slowness
 idx_wb = 9 # index of the water bottom
-niterations = 15
+niterations = 50
 
 
 ####################################################################################################
@@ -42,7 +43,7 @@ obj_all = SharedArray{Float32,2}(niterations, test_size)
 t1 = now()
 println(string("FWI parallel computation starts at ", t1))
 
-@sync @distributed for i = 1:test_size #collect(5:5:100)
+@sync @distributed for i = 1:test_size
 
     println(string("FWI using the ", i, "th sample of X posterior starts at ", now() ))
 
@@ -62,7 +63,7 @@ println(string("FWI parallel computation finishes after ", Dates.value.(t2-t1)/3
 m0_all = Array(m0_all)
 fwi_all = Array(fwi_all)
 obj_all = Array(obj_all)
-save(string("./figs/", figfolder, "/fwi_post_samples.jld"), "m0_all", m0_all, "fwi_all", fwi_all, "obj_all", obj_all)
+save(plotsdir(figfolder, "fwi_post_samples.jld"), "m0_all", m0_all, "fwi_all", fwi_all, "obj_all", obj_all)
 
 i=1
 v = sqrt.(1f0 ./ m)
@@ -75,7 +76,7 @@ ax1 = subplot(2, 2, 1); imshow(v, cmap="jet", aspect = "auto"); plt.colorbar(); 
 ax2 = subplot(2, 2, 2); imshow(v0, cmap="jet", aspect = "auto"); plt.colorbar(); title(string("Initial model, L2=", round(norm(v-v0,2), sigdigits=4)))
 ax3 = subplot(2, 2, 3); imshow(fwi_v, cmap="jet", aspect = "auto"); plt.colorbar(); title(string("FWI result, L2=", round(norm(v-fwi_v,2), sigdigits=4))) 
 ax4 = subplot(2, 2, 4); plot(obj); title("Objective function value")
-savefig(string("./figs/", figfolder, "/fwi_post_samples.png"))
+savefig(plotsdir(figfolder, "fwi_post_samples.png"))
 
 ####################################################################################################
 ## Scenario 2: initial velocity m0 = Mean of the FWI results in Scenario 1
@@ -86,23 +87,23 @@ fwi_std =  dropdims( std(fwi_all, dims=3), dims=3 )
 figure(figsize=[16,8])
 ax1 = subplot(1, 2, 1); imshow(fwi_mean, cmap="jet", aspect = "auto"); plt.colorbar(); title("Mean of FWI")
 ax2 = subplot(1, 2, 2); imshow(fwi_std, cmap="jet", aspect = "auto"); plt.colorbar(); title("Standard deviation of FWI")
-savefig(string("./figs/", figfolder, "/fwi_mean&std.png"))
+savefig(plotsdir(figfolder, "fwi_mean&std.png"))
 
 fwi_mean[1:idx_wb, :] .= m[1,1]
 fwi1, obj1 = fwi(m, fwi_mean, niterations)
-save(string("./figs/", figfolder, "/fwi_fwi_mean.jld"), "m", m, "m0", fwi_mean, "fwi", fwi1, "obj", obj1)
+save(plotsdir(figfolder, "fwi_fwi_mean.jld"), "m", m, "m0", fwi_mean, "fwi", fwi1, "obj", obj1)
 
 v = sqrt.(1f0 ./ m)
 v0 = sqrt.(1f0 ./ fwi_mean)
-fwi_v = sqrt.(1f0 ./ fwi3)
-obj = obj3
+fwi_v = sqrt.(1f0 ./ fwi1)
+obj = obj1
 
 figure(figsize=[16,8])
 ax1 = subplot(2, 2, 1); imshow(v, cmap="jet", aspect = "auto"); plt.colorbar(); title("True velocity (km/s)")
 ax2 = subplot(2, 2, 2); imshow(v0, cmap="jet", aspect = "auto"); plt.colorbar(); title(string("Initial model, L2=", round(norm(v-v0,2), sigdigits=4)))
 ax3 = subplot(2, 2, 3); imshow(fwi_v, cmap="jet", aspect = "auto"); plt.colorbar(); title(string("FWI result, L2=", round(norm(v-fwi_v,2), sigdigits=4))) 
 ax4 = subplot(2, 2, 4); plot(obj); title("Objective function value")
-savefig(string("./figs/", figfolder, "/fwi_fwi_mean.png"))
+savefig(plotsdir(figfolder, "fwi_fwi_mean.png"))
 
 
 ####################################################################################################
@@ -114,7 +115,7 @@ m0[1:idx_wb, :] .= m[1,1]
 m0[idx_wb+1:end, :] = imfilter(m0[idx_wb+1:end, :], Kernel.gaussian(3)) # smoothed velocity
 
 fwi2, obj2 = fwi(m, m0, niterations)
-save(string("./figs/", figfolder, "/fwi_post_mean.jld"), "m", m, "m0", m0, "fwi", fwi2, "obj", obj2)
+save(plotsdir(figfolder, "fwi_post_mean.jld"), "m", m, "m0", m0, "fwi", fwi2, "obj", obj2)
 
 v = sqrt.(1f0 ./ m)
 v0 = sqrt.(1f0 ./ m0)
@@ -126,7 +127,7 @@ ax1 = subplot(2, 2, 1); imshow(v, cmap="jet", aspect = "auto"); plt.colorbar(); 
 ax2 = subplot(2, 2, 2); imshow(v0, cmap="jet", aspect = "auto"); plt.colorbar(); title(string("Initial model, L2=", round(norm(v-v0,2), sigdigits=4)))
 ax3 = subplot(2, 2, 3); imshow(fwi_v, cmap="jet", aspect = "auto"); plt.colorbar(); title(string("FWI result, L2=", round(norm(v-fwi_v,2), sigdigits=4))) 
 ax4 = subplot(2, 2, 4); plot(obj); title("Objective function value")
-savefig(string("./figs/", figfolder, "/fwi_post_mean.png"))
+savefig(plotsdir(figfolder, "fwi_post_mean.png"))
 
 
 ####################################################################################################
@@ -141,7 +142,7 @@ v0[1:idx_wb] .= m[1,1] # water layer velocity
 m_lin = repeat(v0, 1, n2)
 
 fwi3, obj3 = fwi(m, m_lin, niterations)
-save(string("./figs/", figfolder, "/fwi_lin_vel.jld"), "m", m, "m0", m_lin, "fwi", fwi3, "obj", obj3)
+save(plotsdir(figfolder, "fwi_lin_vel.jld"), "m", m, "m0", m_lin, "fwi", fwi3, "obj", obj3)
 
 v = sqrt.(1f0 ./ m)
 v0 = sqrt.(1f0 ./ m_lin)
@@ -153,7 +154,7 @@ ax1 = subplot(2, 2, 1); imshow(v, cmap="jet", aspect = "auto"); plt.colorbar(); 
 ax2 = subplot(2, 2, 2); imshow(v0, cmap="jet", aspect = "auto"); plt.colorbar(); title(string("Initial model, L2=", round(norm(v-v0,2), sigdigits=4)))
 ax3 = subplot(2, 2, 3); imshow(fwi_v, cmap="jet", aspect = "auto"); plt.colorbar(); title(string("FWI result, L2=", round(norm(v-fwi_v,2), sigdigits=4))) 
 ax4 = subplot(2, 2, 4); plot(obj); title("Objective function value")
-savefig(string("./figs/", figfolder, "/fwi_lin_vel.png"))
+savefig(plotsdir(figfolder, "fwi_lin_vel.png"))
 
 
 ####################################################################################################
@@ -164,7 +165,7 @@ m_smooth = m[1,1] .* ones(Float32, size(m)) # smoothed velocity
 m_smooth[idx_wb+1:end, :] = imfilter(m[idx_wb+1:end, :], Kernel.gaussian(10)) # smoothed velocity
 
 fwi4, obj4 = fwi(m, m_smooth, niterations)
-save(string("./figs/", figfolder, "/fwi_smooth_vel.jld"), "m", m, "m0", m_smooth, "fwi", fwi4, "obj", obj4)
+save(plotsdir(figfolder, "fwi_smooth_vel.jld"), "m", m, "m0", m_smooth, "fwi", fwi4, "obj", obj4)
 
 v = sqrt.(1f0 ./ m)
 v0 = sqrt.(1f0 ./ m_smooth)
@@ -176,4 +177,93 @@ ax1 = subplot(2, 2, 1); imshow(v, cmap="jet", aspect = "auto"); plt.colorbar(); 
 ax2 = subplot(2, 2, 2); imshow(v0, cmap="jet", aspect = "auto"); plt.colorbar(); title(string("Initial model, L2=", round(norm(v-v0,2), sigdigits=4)))
 ax3 = subplot(2, 2, 3); imshow(fwi_v, cmap="jet", aspect = "auto"); plt.colorbar(); title(string("FWI result, L2=", round(norm(v-fwi_v,2), sigdigits=4))) 
 ax4 = subplot(2, 2, 4); plot(obj); title("Objective function value")
-savefig(string("./figs/", figfolder, "/fwi_smooth_vel.png"))
+savefig(plotsdir(figfolder, "fwi_smooth_vel.png"))
+
+
+####################################################################################################
+# # Load data for Scenario 1-4
+# m0_all, fwi_all, obj_all = load(plotsdir(figfolder, "fwi_post_samples.jld"), "m0_all", "fwi_all", "obj_all")
+# m, fwi_mean, fwi1, obj1 = loads(plotsdir(figfolder, "fwi_fwi_mean.jld"), "m", "m0", "fwi", "obj")
+# m, m0, fwi2, obj2 = load(plotsdir(figfolder, "fwi_post_mean.jld"), "m", "m0", "fwi", "obj")
+# m, m_lin, fwi3, obj3 = load(plotsdir(figfolder, "fwi_lin_vel.jld"), "m", "m0", "fwi", "obj")
+# m, m_smooth, fwi4, obj4 = load(plotsdir(figfolder, "fwi_smooth_vel.jld"), "m", "m0", "fwi", "obj")
+
+# Figures in slowness squared (s^2/km^2)
+figure(); imshow(m, cmap="jet", aspect = "auto"); plt.colorbar(); title(L"True velocity ($s^2/km^2$)")
+savefig(plotsdir(figfolder, "vel_m.png"))
+
+figure(figsize=[20,12])
+ax1 = subplot(3, 4, 1); imshow(m0_all[idx_wb+1:end,:,1], cmap="jet", aspect = "auto"); plt.colorbar(); title("Smoothed posterior sample1")
+ax2 = subplot(3, 4, 2); imshow(m0_all[idx_wb+1:end,:,2], cmap="jet", aspect = "auto"); plt.colorbar(); title("Smoothed posterior sample2")
+ax3 = subplot(3, 4, 3); imshow(m0_all[idx_wb+1:end,:,3], cmap="jet", aspect = "auto"); plt.colorbar(); title("Smoothed posterior sample3")
+ax4 = subplot(3, 4, 4); imshow(m0[idx_wb+1:end, :], cmap="jet", aspect = "auto"); plt.colorbar(); title("Smoothed posterior mean")
+ax5 = subplot(3, 4, 5); imshow(fwi_all[idx_wb+1:end,:,1], cmap="jet", aspect = "auto"); plt.colorbar(); title(string("FWI result, L2=", round(norm(m-fwi_all[:,:,1],2), sigdigits=4)))
+ax6 = subplot(3, 4, 6); imshow(fwi_all[idx_wb+1:end,:,2], cmap="jet", aspect = "auto"); plt.colorbar(); title(string("FWI result, L2=", round(norm(m-fwi_all[:,:,2],2), sigdigits=4)))
+ax7 = subplot(3, 4, 7); imshow(fwi_all[idx_wb+1:end,:,3], cmap="jet", aspect = "auto"); plt.colorbar(); title(string("FWI result, L2=", round(norm(m-fwi_all[:,:,3],2), sigdigits=4)))
+ax8 = subplot(3, 4, 8); imshow(fwi2[idx_wb+1:end, :], cmap="jet", aspect = "auto"); plt.colorbar(); title(string("FWI result, L2=", round(norm(m-fwi2,2), sigdigits=4)))
+ax9 = subplot(3, 4, 9); plot(obj_all[:,1]); title("Objective function value")
+ax10 = subplot(3, 4, 10); plot(obj_all[:,2]); title("Objective function value")
+ax11 = subplot(3, 4, 11); plot(obj_all[:,3]); title("Objective function value")
+ax12 = subplot(3, 4, 12); plot(obj2); title("Objective function value")
+savefig(plotsdir(figfolder, "fwi_m_post.png"))
+
+figure(figsize=[20,12])
+ax1 = subplot(3, 4, 1); imshow(m0_all[idx_wb+1:end,:,1], cmap="jet", aspect = "auto"); plt.colorbar(); title("Smoothed posterior sample")
+ax2 = subplot(3, 4, 2); imshow(m0[idx_wb+1:end, :], cmap="jet", aspect = "auto"); plt.colorbar(); title("Smoothed posterior mean")
+ax3 = subplot(3, 4, 3); imshow(m_lin[idx_wb+1:end, :], cmap="jet", aspect = "auto"); plt.colorbar(); title("Migration velocity in RTM")
+ax4 = subplot(3, 4, 4); imshow(m_smooth[idx_wb+1:end, :], cmap="jet", aspect = "auto"); plt.colorbar(); title("Smoothed true velocity")
+ax5 = subplot(3, 4, 5); imshow(fwi_all[idx_wb+1:end,:,1], cmap="jet", aspect = "auto"); plt.colorbar(); title(string("FWI result, L2=", round(norm(m-fwi_all[:,:,1],2), sigdigits=4)))
+ax6 = subplot(3, 4, 6); imshow(fwi2[idx_wb+1:end, :], cmap="jet", aspect = "auto"); plt.colorbar(); title(string("FWI result, L2=", round(norm(m-fwi2,2), sigdigits=4))) 
+ax7 = subplot(3, 4, 7); imshow(fwi3[idx_wb+1:end, :], cmap="jet", aspect = "auto"); plt.colorbar(); title(string("FWI result, L2=", round(norm(m-fwi3,2), sigdigits=4)))
+ax8 = subplot(3, 4, 8); imshow(fwi4[idx_wb+1:end, :], cmap="jet", aspect = "auto"); plt.colorbar(); title(string("FWI result, L2=", round(norm(m-fwi4,2), sigdigits=4)))
+ax9 = subplot(3, 4, 9); plot(obj_all[:,1]); title("Objective function value")
+ax10 = subplot(3, 4, 10); plot(obj2); title("Objective function value")
+ax11 = subplot(3, 4, 11); plot(obj3); title("Objective function value")
+ax12 = subplot(3, 4, 12); plot(obj4); title("Objective function value")
+savefig(plotsdir(figfolder, "fwi_m.png"))
+
+# Figures in velocity (km/s)
+v = sqrt.(1f0 ./ m)
+
+v0_all = sqrt.(1f0 ./ m0_all[:,:,1:3])
+v0 = sqrt.(1f0 ./ m0)
+v_lin = sqrt.(1f0 ./ m_lin)
+v_smooth = sqrt.(1f0 ./ m_smooth)
+
+fwi_v_all = sqrt.(1f0 ./ fwi_all[:,:,1:3])
+fwi2_v = sqrt.(1f0 ./ fwi2)
+fwi3_v = sqrt.(1f0 ./ fwi3)
+fwi4_v = sqrt.(1f0 ./ fwi4)
+
+figure(); imshow(v, vmin=1.8, vmax=5.0, cmap="jet", aspect = "auto"); plt.colorbar(); title(L"True velocity ($km/s$)")
+savefig(plotsdir(figfolder, "vel.png"))
+
+figure(figsize=[20,12])
+ax1 = subplot(3, 4, 1); imshow(v0_all[:,:,1], vmin=1.8, vmax=5.0, cmap="jet", aspect = "auto"); plt.colorbar(); title("Smoothed posterior sample1")
+ax2 = subplot(3, 4, 2); imshow(v0_all[:,:,2], vmin=1.8, vmax=5.0, cmap="jet", aspect = "auto"); plt.colorbar(); title("Smoothed posterior sample2")
+ax3 = subplot(3, 4, 3); imshow(v0_all[:,:,3], vmin=1.8, vmax=5.0, cmap="jet", aspect = "auto"); plt.colorbar(); title("Smoothed posterior sample3")
+ax4 = subplot(3, 4, 4); imshow(v0, vmin=1.8, vmax=5.0, cmap="jet", aspect = "auto"); plt.colorbar(); title("Smoothed posterior mean")
+ax5 = subplot(3, 4, 5); imshow(fwi_v_all[:,:,1], vmin=1.8, vmax=5.0, cmap="jet", aspect = "auto"); plt.colorbar(); title(string("FWI result, L2=", round(norm(v-fwi_v_all[:,:,1],2), sigdigits=4)))
+ax6 = subplot(3, 4, 6); imshow(fwi_v_all[:,:,2], vmin=1.8, vmax=5.0, cmap="jet", aspect = "auto"); plt.colorbar(); title(string("FWI result, L2=", round(norm(v-fwi_v_all[:,:,2],2), sigdigits=4)))
+ax7 = subplot(3, 4, 7); imshow(fwi_v_all[:,:,3], vmin=1.8, vmax=5.0, cmap="jet", aspect = "auto"); plt.colorbar(); title(string("FWI result, L2=", round(norm(v-fwi_v_all[:,:,3],2), sigdigits=4)))
+ax8 = subplot(3, 4, 8); imshow(fwi2_v, vmin=1.8, vmax=5.0, cmap="jet", aspect = "auto"); plt.colorbar(); title(string("FWI result, L2=", round(norm(v-fwi2_v,2), sigdigits=4)))
+ax9 = subplot(3, 4, 9); plot(obj_all[:,1]); title("Objective function value")
+ax10 = subplot(3, 4, 10); plot(obj_all[:,2]); title("Objective function value")
+ax11 = subplot(3, 4, 11); plot(obj_all[:,3]); title("Objective function value")
+ax12 = subplot(3, 4, 12); plot(obj2); title("Objective function value")
+savefig(plotsdir(figfolder, "fwi_v_post.png"))
+
+figure(figsize=[20,12])
+ax1 = subplot(3, 4, 1); imshow(v0_all[:,:,1], vmin=1.8, vmax=5.0, cmap="jet", aspect = "auto"); plt.colorbar(); title("Smoothed posterior sample")
+ax2 = subplot(3, 4, 2); imshow(v0, vmin=1.8, vmax=5.0, cmap="jet", aspect = "auto"); plt.colorbar(); title("Smoothed posterior mean")
+ax3 = subplot(3, 4, 3); imshow(v_lin, vmin=1.8, vmax=5.0, cmap="jet", aspect = "auto"); plt.colorbar(); title("Migration velocity in RTM")
+ax4 = subplot(3, 4, 4); imshow(v_smooth, vmin=1.8, vmax=5.0, cmap="jet", aspect = "auto"); plt.colorbar(); title("Smoothed true velocity")
+ax5 = subplot(3, 4, 5); imshow(fwi_v_all[:,:,1], vmin=1.8, vmax=5.0, cmap="jet", aspect = "auto"); plt.colorbar(); title(string("FWI result, L2=", round(norm(v-fwi_v_all[:,:,1],2), sigdigits=4)))
+ax6 = subplot(3, 4, 6); imshow(fwi2_v, vmin=1.8, vmax=5.0, cmap="jet", aspect = "auto"); plt.colorbar(); title(string("FWI result, L2=", round(norm(v-fwi2_v,2), sigdigits=4))) 
+ax7 = subplot(3, 4, 7); imshow(fwi3_v, vmin=1.8, vmax=5.0, cmap="jet", aspect = "auto"); plt.colorbar(); title(string("FWI result, L2=", round(norm(v-fwi3_v,2), sigdigits=4)))
+ax8 = subplot(3, 4, 8); imshow(fwi4_v, vmin=1.8, vmax=5.0, cmap="jet", aspect = "auto"); plt.colorbar(); title(string("FWI result, L2=", round(norm(v-fwi4_v,2), sigdigits=4)))
+ax9 = subplot(3, 4, 9); plot(obj_all[:,1]); title("Objective function value")
+ax10 = subplot(3, 4, 10); plot(obj2); title("Objective function value")
+ax11 = subplot(3, 4, 11); plot(obj3); title("Objective function value")
+ax12 = subplot(3, 4, 12); plot(obj4); title("Objective function value")
+savefig(plotsdir(figfolder, "fwi_v.png"))
