@@ -69,7 +69,7 @@ module RTM_64x200
 
         rtm = adjoint(J) * (d_obs - d_syn)
 
-        return rtm
+        return d_obs, rtm
     end
 
     
